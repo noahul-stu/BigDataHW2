@@ -113,6 +113,24 @@ public class HW2StudentAnswer implements HW2API{
 		
 		session.execute(createItemsTable);
 		
+		//reviews_by_user table 
+		//noa this is your place 
+		
+		
+		//reviews_by_item table
+		String createReviewsByItemTable = 
+			    "CREATE TABLE IF NOT EXISTS " + TABLE_REVIEWS_BY_ITEM + " (" +
+			    "    asin text," +
+			    "    time timestamp," +
+			    "    reviewerID text," +
+			    "    reviewerName text," +
+			    "    rating int," +
+			    "    summary text," +
+			    "    reviewText text," +
+			    "    PRIMARY KEY ((asin), time, reviewerID)" +
+			    ") WITH CLUSTERING ORDER BY (time DESC, reviewerID ASC);";
+		
+		session.execute(createReviewsByItemTable);
 	}
 
 	@Override
@@ -123,10 +141,10 @@ public class HW2StudentAnswer implements HW2API{
 
 	    //reviews
 //	    insertReviewByUser = session.prepare("INSERT INTO " + TABLE_REVIEWS_BY_USER + " (reviewerID, time, asin, reviewerName, rating, summary, reviewText) VALUES (?, ?, ?, ?, ?, ?, ?)");
-//	    insertReviewByItem = session.prepare("INSERT INTO " + TABLE_REVIEWS_BY_ITEM + " (asin, time, reviewerID, reviewerName, rating, summary, reviewText) VALUES (?, ?, ?, ?, ?, ?, ?)");
+	    insertReviewByItem = session.prepare("INSERT INTO " + TABLE_REVIEWS_BY_ITEM + " (asin, time, reviewerID, reviewerName, rating, summary, reviewText) VALUES (?, ?, ?, ?, ?, ?, ?)");
 //	    
 //	    selectReviewsByUser = session.prepare("SELECT * FROM " + TABLE_REVIEWS_BY_USER + " WHERE reviewerID = ?");
-//	    selectReviewsByItem = session.prepare("SELECT * FROM " + TABLE_REVIEWS_BY_ITEM + " WHERE asin = ?");
+	    selectReviewsByItem = session.prepare("SELECT * FROM " + TABLE_REVIEWS_BY_ITEM + " WHERE asin = ?");
 
 
 
@@ -147,6 +165,25 @@ public class HW2StudentAnswer implements HW2API{
             }
         }
     	System.out.println(uniqueKeys.size());
+    	
+        Set<String> uniqueReviewKeys = new HashSet<>();
+        String[] reviewTokenRanges = {
+            "token(asin) >= 3000000000000000000",
+            "token(asin) < 3000000000000000000 AND token(asin) >= 0",
+            "token(asin) < 0 AND token(asin) >= -3000000000000000000",
+            "token(asin) < -3000000000000000000"
+        };
+
+        for (String range : reviewTokenRanges) {
+            // Counting unique reviews by concatenating asin and reviewerID
+            String query = "SELECT asin, reviewerID FROM " + TABLE_REVIEWS_BY_ITEM + " WHERE " + range; 
+            ResultSet rs = session.execute(query);
+            for (Row row : rs) {
+                // Creating a unique key for the set
+                uniqueReviewKeys.add(row.getString("asin") + "_" + row.getString("reviewerID"));
+            }
+        }
+        System.out.println("Total unique reviews in DB: " + uniqueReviewKeys.size());
 
 	
 	}
@@ -209,9 +246,58 @@ public class HW2StudentAnswer implements HW2API{
 
 	@Override
 	public void loadReviews(String pathReviewsFile) throws Exception {
-		//TODO: implement this function
-		System.out.println("TODO: implement this function...");
+		// initialize 250 threads
+		ExecutorService executor = Executors.newFixedThreadPool(250);
+		// allow only 100 concurrent requests to AstraDB at a time
+		Semaphore throttler = new Semaphore(100);
+
+		try (BufferedReader br = new BufferedReader(new FileReader(pathReviewsFile))) {
+			String line;
+			while ((line = br.readLine()) != null) {
+						final String currentLine = line;
+						
+						executor.execute(() -> {
+							try {
+								throttler.acquire(); // wait for permit to go
+								
+								JSONObject json = new JSONObject(currentLine);
+								
+							// extract attributes with fallback to not available
+							String asin 		= json.optString("asin", NOT_AVAILABLE_VALUE);
+							String reviewerID 	= json.optString("reviewerID", NOT_AVAILABLE_VALUE);
+							String reviewerName = json.optString("reviewerName", NOT_AVAILABLE_VALUE);
+							String summary 		= json.optString("summary", NOT_AVAILABLE_VALUE);
+							String reviewText 	= json.optString("reviewText", NOT_AVAILABLE_VALUE);
+							int rating 			= json.optInt("overall", 0);
+								
+							// convert unixReviewTime (long) to Instant for Cassandra timestamp
+							long unixTime = json.optLong("unixReviewTime", 0);
+							Instant time = Instant.ofEpochSecond(unixTime);
+								
+							// insert into reviews_by_item table
+							session.execute(insertReviewByItem.bind(asin, time, reviewerID, reviewerName, rating, summary, reviewText));
+								
+							/* TODO: once the reviews_by_user table is ready, 
+								   insert into insertReviewByUser as well */ 
+							// NOA
+
+							} catch (Exception e) {
+								System.err.println("Failed to load a review line: " + e.getMessage());
+							} finally {
+								throttler.release();
+							}
+						});
+					}
+				} 
+		catch (Exception e) {
+				System.out.println("Loading reviews failed: " + e.getMessage());
+		}
+				
+		executor.shutdown();
+		executor.awaitTermination(1, TimeUnit.HOURS);
+		System.out.println("Done loading reviews");
 	}
+	
 
 	@Override
 	public String item(String asin) {
@@ -271,50 +357,70 @@ public class HW2StudentAnswer implements HW2API{
 
 	@Override
 	public Iterable<String> itemReviews(String asin) {
-		// the order of the reviews should be by the time (desc), then by the reviewerID
-		//TODO: implement this function
-		System.out.println("TODO: implement this function...");
+		// list to store the formatted review strings
+		ArrayList<String> reviewRepers = new ArrayList<String>();
+			
+		// execute query - results arrive pre-sorted by Cassandra (time DESC, reviewerID ASC)
+		ResultSet rs = session.execute(selectReviewsByItem.bind(asin));
+			
+		// iterate through all reviews found for this item
+		for (Row row : rs) {
+			String reviewRepr = formatReview(
+				row.getInstant("time"),
+				row.getString("asin"),
+				row.getString("reviewerID"),
+				row.getString("reviewerName"),
+				row.getInt("rating"),
+				row.getString("summary"),
+				row.getString("reviewText")
+			);
+			reviewRepers.add(reviewRepr);
+		}
+
+		System.out.println("total reviews: " + reviewRepers.size());
+		return reviewRepers;
+	
 		
 		// required format - example for asin B005QDQXGQ
-		ArrayList<String> reviewRepers = new ArrayList<String>();
-		reviewRepers.add(
-			formatReview(
-				Instant.ofEpochSecond(1391299200),
-				"B005QDQXGQ",
-				"A1I5J5RUJ5JB4B",
-				"T. Taylor \"jediwife3\"",
-				5,
-				"Play and Learn",
-				"The kids had a great time doing hot potato and then having to answer a question if they got stuck with the &#34;potato&#34;. The younger kids all just sat around turnin it to read it."
-			)
-		);
+//		ArrayList<String> reviewRepers = new ArrayList<String>();
+//		reviewRepers.add(
+//			formatReview(
+//				Instant.ofEpochSecond(1391299200),
+//				"B005QDQXGQ",
+//				"A1I5J5RUJ5JB4B",
+//				"T. Taylor \"jediwife3\"",
+//				5,
+//				"Play and Learn",
+//				"The kids had a great time doing hot potato and then having to answer a question if they got stuck with the &#34;potato&#34;. The younger kids all just sat around turnin it to read it."
+//			)
+//		);
 
-		reviewRepers.add(
-			formatReview(
-				Instant.ofEpochSecond(1390694400),
-				"B005QDQXGQ",
-				"\"AF2CSZ8IP8IPU\"",
-				"Corey Valentine \"sue\"",
-				1,
-			 	"Not good",
-				"This Was not worth 8 dollars would not recommend to others to buy for kids at that price do not buy"
-			)
-		);
+//		reviewRepers.add(
+//			formatReview(
+//				Instant.ofEpochSecond(1390694400),
+//				"B005QDQXGQ",
+//				"\"AF2CSZ8IP8IPU\"",
+//				"Corey Valentine \"sue\"",
+//				1,
+//			 	"Not good",
+//				"This Was not worth 8 dollars would not recommend to others to buy for kids at that price do not buy"
+//			)
+//		);
 		
-		reviewRepers.add(
-			formatReview(
-				Instant.ofEpochSecond(1388275200),
-				"B005QDQXGQ",
-				"A27W10NHSXI625",
-				"Beth",
-				2,
-				"Way overpriced for a beach ball",
-				"It was my own fault, I guess, for not thoroughly reading the description, but this is just a blow-up beach ball.  For that, I think it was very overpriced.  I thought at least I was getting one of those pre-inflated kickball-type balls that you find in the giant bins in the chain stores.  This did have a page of instructions for a few different games kids can play.  Still, I think kids know what to do when handed a ball, and there's a lot less you can do with a beach ball than a regular kickball, anyway."
-			)
-		);
+//		reviewRepers.add(
+//			formatReview(
+//				Instant.ofEpochSecond(1388275200),
+//				"B005QDQXGQ",
+//				"A27W10NHSXI625",
+//				"Beth",
+//				2,
+//				"Way overpriced for a beach ball",
+//				"It was my own fault, I guess, for not thoroughly reading the description, but this is just a blow-up beach ball.  For that, I think it was very overpriced.  I thought at least I was getting one of those pre-inflated kickball-type balls that you find in the giant bins in the chain stores.  This did have a page of instructions for a few different games kids can play.  Still, I think kids know what to do when handed a ball, and there's a lot less you can do with a beach ball than a regular kickball, anyway."
+//			)
+//		);
 
-		System.out.println("total reviews: " + 3);
-		return reviewRepers;
+//		System.out.println("total reviews: " + 3);
+//		return reviewRepers;
 	}
 
 	
