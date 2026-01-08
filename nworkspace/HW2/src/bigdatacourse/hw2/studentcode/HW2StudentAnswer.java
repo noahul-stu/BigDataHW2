@@ -1,3 +1,4 @@
+
 package bigdatacourse.hw2.studentcode;
 
 import java.nio.file.Paths;
@@ -39,7 +40,7 @@ import bigdatacourse.hw2.HW2API;
 public class HW2StudentAnswer implements HW2API{
 	
 	// general consts
-	public static final String		NOT_AVAILABLE_VALUE 	=		"na";
+	public static final String NOT_AVAILABLE_VALUE = "na";
 
 	// CQL stuff
 	private static final String TABLE_ITEMS = "items";
@@ -114,8 +115,19 @@ public class HW2StudentAnswer implements HW2API{
 		session.execute(createItemsTable);
 		
 		//reviews_by_user table 
-		//noa this is your place 
+		String createReviewsByUserTable = 
+			    "CREATE TABLE IF NOT EXISTS " + TABLE_REVIEWS_BY_USER + " (" +
+			    "    asin text," +
+			    "    time timestamp," +
+			    "    reviewerID text," +
+			    "    reviewerName text," +
+			    "    rating int," +
+			    "    summary text," +
+			    "    reviewText text," +
+			    "    PRIMARY KEY (reviewerID, time, asin)" +
+			    ") WITH CLUSTERING ORDER BY (time DESC, asin ASC);";	
 		
+		session.execute(createReviewsByUserTable);
 		
 		//reviews_by_item table
 		String createReviewsByItemTable = 
@@ -140,12 +152,11 @@ public class HW2StudentAnswer implements HW2API{
 	    selectItem = session.prepare("SELECT * FROM " + TABLE_ITEMS + " WHERE asin = ?");
 
 	    //reviews
-//	    insertReviewByUser = session.prepare("INSERT INTO " + TABLE_REVIEWS_BY_USER + " (reviewerID, time, asin, reviewerName, rating, summary, reviewText) VALUES (?, ?, ?, ?, ?, ?, ?)");
+	    insertReviewByUser = session.prepare("INSERT INTO " + TABLE_REVIEWS_BY_USER + " (reviewerID, time, asin, reviewerName, rating, summary, reviewText) VALUES (?, ?, ?, ?, ?, ?, ?)");
 	    insertReviewByItem = session.prepare("INSERT INTO " + TABLE_REVIEWS_BY_ITEM + " (asin, time, reviewerID, reviewerName, rating, summary, reviewText) VALUES (?, ?, ?, ?, ?, ?, ?)");
-//	    
-//	    selectReviewsByUser = session.prepare("SELECT * FROM " + TABLE_REVIEWS_BY_USER + " WHERE reviewerID = ?");
+	    
+	    selectReviewsByUser = session.prepare("SELECT * FROM " + TABLE_REVIEWS_BY_USER + " WHERE reviewerID = ?");
 	    selectReviewsByItem = session.prepare("SELECT * FROM " + TABLE_REVIEWS_BY_ITEM + " WHERE asin = ?");
-
 
 
         Set<String> uniqueKeys = new HashSet<>();
@@ -176,7 +187,7 @@ public class HW2StudentAnswer implements HW2API{
 
         for (String range : reviewTokenRanges) {
             // Counting unique reviews by concatenating asin and reviewerID
-            String query = "SELECT asin, reviewerID FROM " + TABLE_REVIEWS_BY_ITEM + " WHERE " + range; 
+            String query = "SELECT asin, reviewerID FROM " + TABLE_REVIEWS_BY_USER + " WHERE " + range; 
             ResultSet rs = session.execute(query);
             for (Row row : rs) {
                 // Creating a unique key for the set
@@ -191,9 +202,9 @@ public class HW2StudentAnswer implements HW2API{
 	@Override
 	public void loadItems(String pathItemsFile) throws Exception {
 	    // initialize 250 threads
-	    ExecutorService executor = Executors.newFixedThreadPool(250);
+	    ExecutorService executor = Executors.newFixedThreadPool(64);
 	    // allow only 100 concurrent requests to AstraDB at a time
-	    Semaphore throttler = new Semaphore(100);
+	    Semaphore throttler = new Semaphore(32);
 
 	    try (BufferedReader br = new BufferedReader(new FileReader(pathItemsFile))) {
 	        String line;
@@ -275,11 +286,11 @@ public class HW2StudentAnswer implements HW2API{
 							Instant time = Instant.ofEpochSecond(unixTime);
 								
 							// insert into reviews_by_item table
-							session.execute(insertReviewByItem.bind(asin, time, reviewerID, reviewerName, rating, summary, reviewText));
+//							TODO remove the comment out 
+//							session.execute(insertReviewByItem.bind(asin, time, reviewerID, reviewerName, rating, summary, reviewText));
 								
-							/* TODO: once the reviews_by_user table is ready, 
-								   insert into insertReviewByUser as well */ 
-							// NOA
+							// insert into reviews_by_user_table
+							session.execute(insertReviewByUser.bind(reviewerID, time, asin, reviewerName, rating, summary, reviewText));
 
 							} catch (Exception e) {
 								System.err.println("Failed to load a review line: " + e.getMessage());
@@ -301,58 +312,61 @@ public class HW2StudentAnswer implements HW2API{
 
 	@Override
 	public String item(String asin) {
-		//TODO: implement this function
-		System.out.println("TODO: implement this function...");
-		
-		// you should return the item's description based on the formatItem function.
-		// if it does not exist, return the string "not exists"
-		// example for asin B005QB09TU
-		String item = "not exists";	// if not exists
-		if (true) // if exists
-			item = formatItem(
-				"B005QB09TU",
-				"Circa Action Method Notebook",
-				"http://ecx.images-amazon.com/images/I/41ZxT4Opx3L._SY300_.jpg",
-				new TreeSet<String>(Arrays.asList("Notebooks & Writing Pads", "Office & School Supplies", "Office Products", "Paper")),
-				"Circa + Behance = Productivity. The minute-to-minute flexibility of Circa note-taking meets the organizational power of the Action Method by Behance. The result is enhanced productivity, so you'll formulate strategies and achieve objectives even more efficiently with this Circa notebook and project planner. Read Steve's blog on the Behance/Levenger partnership Customize with your logo. Corporate pricing available. Please call 800-357-9991."
-			);
-		
-		return item;
+		// execute query
+	    com.datastax.oss.driver.api.core.cql.ResultSet rs = session.execute(selectItem.bind(asin));
+	    java.util.List<com.datastax.oss.driver.api.core.cql.Row> rows = rs.all();
+
+	    // return "not exists" if the asin isn't found
+	    if (rows.isEmpty()) {
+	        return "not exists";
+	    }
+
+	    // extract all columns that do not change between same ansi rows
+	    com.datastax.oss.driver.api.core.cql.Row firstRow = rows.get(0);
+	    String title = firstRow.getString("title");
+	    String imageUrl = firstRow.getString("imUrl");
+	    String description = firstRow.getString("description");
+
+	    // get all categories into a TreeSet
+	    Set<String> categories = new TreeSet<>();
+	    for (com.datastax.oss.driver.api.core.cql.Row row : rows) {
+	        String category = row.getString("category_name");
+	        
+	        // filter out the 'na' placeholder we used
+	        if (category != null && !category.equals(NOT_AVAILABLE_VALUE)) {
+	            categories.add(category);
+	        }
+	    }
+	    
+	    return formatItem(asin, title, imageUrl, categories, description);
 	}
 	
 	
 	@Override
 	public Iterable<String> userReviews(String reviewerID) {
-		// the order of the reviews should be by the time (desc), then by the asin
-		//TODO: implement this function
-		System.out.println("TODO: implement this function...");
-		
-		// required format - example for reviewerID A17OJCRPMYWXWV
-		ArrayList<String> reviewRepers = new ArrayList<String>();
-		String reviewRepr1 = formatReview(
-			Instant.ofEpochSecond(1362614400),
-			"B005QDG2AI",
-			"A17OJCRPMYWXWV",
- 			"Old Flour Child",
-			5,
-			"excellent quality",
-			"These cartridges are excellent .  I purchased them for the office where I work and they perform  like a dream.  They are a fraction of the price of the brand name cartridges.  I will order them again!"
-		);
-		reviewRepers.add(reviewRepr1);
+		// list to store the formatted review strings
+	    ArrayList<String> reviewRepers = new ArrayList<String>();
+	    
+		// execute query - results arrive pre-sorted by Cassandra (time DESC, asin ASC)
+	    com.datastax.oss.driver.api.core.cql.ResultSet rs = session.execute(selectReviewsByUser.bind(reviewerID));
+	    
+		// iterate through all reviews found for this user
+	    for (com.datastax.oss.driver.api.core.cql.Row row : rs) {
+	        String reviewRepr = formatReview(
+	            row.getInstant("time"),
+	            row.getString("asin"),
+	            row.getString("reviewerID"),
+	            row.getString("reviewerName"),
+	            row.getInt("rating"),
+	            row.getString("summary"),
+	            row.getString("reviewText")
+	        );
+	        reviewRepers.add(reviewRepr);
+	    }
 
-		String reviewRepr2 = formatReview(
-			Instant.ofEpochSecond(1360108800),
-			"B003I89O6W",
-			"A17OJCRPMYWXWV",
-			"Old Flour Child",
-			5,
-			"Checkbook Cover",
-			"Purchased this for the owner of a small automotive repair business I work for.  The old one was being held together with duct tape.  When I saw this one on Amazon (where I look for almost everything first) and looked at the price, I knew this was the one.  Really nice and very sturdy."
-		);
-		reviewRepers.add(reviewRepr2);
-
-		System.out.println("total reviews: " + 2);
-		return reviewRepers;
+	    // print the total count and return the list
+	    System.out.println("total reviews: " + reviewRepers.size());
+	    return reviewRepers;
 	}
 
 	@Override
