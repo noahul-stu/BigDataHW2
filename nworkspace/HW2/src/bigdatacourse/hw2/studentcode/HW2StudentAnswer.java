@@ -157,52 +157,13 @@ public class HW2StudentAnswer implements HW2API{
 	    
 	    selectReviewsByUser = session.prepare("SELECT * FROM " + TABLE_REVIEWS_BY_USER + " WHERE reviewerID = ?");
 	    selectReviewsByItem = session.prepare("SELECT * FROM " + TABLE_REVIEWS_BY_ITEM + " WHERE asin = ?");
-
-
-        Set<String> uniqueKeys = new HashSet<>();
-        String[] tokenRanges = {
-            "token(asin) >= 3000000000000000000",
-            "token(asin) < 3000000000000000000 AND token(asin) >= 0",
-            "token(asin) < 0 AND token(asin) >= -3000000000000000000",
-            "token(asin) < -3000000000000000000"
-        };
-
-        for (String range : tokenRanges) {
-            // Note the space before WHERE
-            String query = "SELECT DISTINCT asin FROM items WHERE " + range; 
-            ResultSet rs = session.execute(query);
-            for (Row row : rs) {
-                uniqueKeys.add(row.getString("asin"));
-            }
-        }
-    	System.out.println(uniqueKeys.size());
     	
-        Set<String> uniqueReviewKeys = new HashSet<>();
-        String[] reviewTokenRanges = {
-            "token(asin) >= 3000000000000000000",
-            "token(asin) < 3000000000000000000 AND token(asin) >= 0",
-            "token(asin) < 0 AND token(asin) >= -3000000000000000000",
-            "token(asin) < -3000000000000000000"
-        };
-
-        for (String range : reviewTokenRanges) {
-            // Counting unique reviews by concatenating asin and reviewerID
-            String query = "SELECT asin, reviewerID FROM " + TABLE_REVIEWS_BY_USER + " WHERE " + range; 
-            ResultSet rs = session.execute(query);
-            for (Row row : rs) {
-                // Creating a unique key for the set
-                uniqueReviewKeys.add(row.getString("asin") + "_" + row.getString("reviewerID"));
-            }
-        }
-        System.out.println("Total unique reviews in DB: " + uniqueReviewKeys.size());
-
-	
 	}
 
 	@Override
 	public void loadItems(String pathItemsFile) throws Exception {
 	    // initialize 250 threads
-	    ExecutorService executor = Executors.newFixedThreadPool(64);
+	    ExecutorService executor = Executors.newFixedThreadPool(250);
 	    // allow only 100 concurrent requests to AstraDB at a time
 	    Semaphore throttler = new Semaphore(32);
 
@@ -286,8 +247,7 @@ public class HW2StudentAnswer implements HW2API{
 							Instant time = Instant.ofEpochSecond(unixTime);
 								
 							// insert into reviews_by_item table
-//							TODO remove the comment out 
-//							session.execute(insertReviewByItem.bind(asin, time, reviewerID, reviewerName, rating, summary, reviewText));
+							session.execute(insertReviewByItem.bind(asin, time, reviewerID, reviewerName, rating, summary, reviewText));
 								
 							// insert into reviews_by_user_table
 							session.execute(insertReviewByUser.bind(reviewerID, time, asin, reviewerName, rating, summary, reviewText));
