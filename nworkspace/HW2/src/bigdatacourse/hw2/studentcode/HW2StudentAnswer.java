@@ -230,7 +230,7 @@ public class HW2StudentAnswer implements HW2API{
 						String reviewerName = json.optString("reviewerName", NOT_AVAILABLE_VALUE);
 						String summary      = json.optString("summary", NOT_AVAILABLE_VALUE);
 						String reviewText   = json.optString("reviewText", NOT_AVAILABLE_VALUE);
-						int rating          = json.optInt("overall", 0); 
+						int rating          = json.optInt("overall", -1); 
 						
 						long unixTime = json.optLong("unixReviewTime", 0);
 						Instant time = Instant.ofEpochSecond(unixTime);

@@ -1,0 +1,10 @@
+{"asin": "TEST001", "title": "Basic Office Notebook", "imUrl": "http://example.com/img1.jpg", "description": "A simple spiral notebook for daily use.", "categories": [["Office Products", "Paper", "Notebooks"]]}
+{"asin": "TEST002", "title": "Premium Desk Organizer", "imUrl": "http://example.com/img2.jpg", "description": "Keep your desk tidy with this organizer.", "categories": [["Office Products", "Desk Accessories", "Organizers"], ["Home & Kitchen", "Storage"]]}
+{"asin": "TEST003", "title": "Wireless Mouse", "imUrl": "http://example.com/img3.jpg", "description": "Ergonomic wireless mouse with USB receiver.", "categories": [["Electronics", "Computers", "Accessories"], ["Office Products", "Computer Accessories"]]}
+{"asin": "TEST004", "title": "Product With Missing Fields", "categories": [["Office Products"]]}
+{"asin": "TEST005", "title": "Stapler Pro 3000", "imUrl": "http://example.com/img5.jpg", "description": "Heavy duty stapler for office use.", "categories": [["Zebra", "Apple", "Banana", "Dog", "Cat"]]}
+{"asin": "TEST006", "title": "Multi-category Item", "imUrl": "http://example.com/img6.jpg", "description": "Available in multiple categories.", "categories": [["Office Products", "Supplies", "Fasteners"], ["Industrial", "Fasteners", "Staples"], ["Arts & Crafts"]]}
+{"asin": "TEST007", "title": "Item with Empty Description", "imUrl": "http://example.com/img7.jpg", "description": "", "categories": [["Office Products"]]}
+{"asin": "TEST008", "title": "Gel Pens Set", "imUrl": "http://example.com/img8.jpg", "description": "Colorful gel pens for smooth writing.", "categories": [["Office Products", "Writing", "Pens"]]}
+{"asin": "TEST009", "title": "Desk Calendar 2024", "imUrl": "http://example.com/img9.jpg", "description": "Large desk calendar with holidays marked.", "categories": [["Office Products", "Calendars"]]}
+{"asin": "TEST010", "title": "Whiteboard Markers", "imUrl": "http://example.com/img10.jpg", "description": "Set of 12 dry erase markers.", "categories": [["Office Products", "Presentation", "Markers"]]}
