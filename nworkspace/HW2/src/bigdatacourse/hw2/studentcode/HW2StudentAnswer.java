@@ -4,7 +4,6 @@ package bigdatacourse.hw2.studentcode;
 import java.nio.file.Paths;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Set;
 import java.util.TreeSet;
 import com.datastax.oss.driver.api.core.CqlSession;
@@ -21,19 +20,16 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.Semaphore;
 
-//TODO: remove if timeout isnt needed
+//remove if timeout isnt needed
 import com.datastax.oss.driver.api.core.config.DefaultDriverOption;
 import com.datastax.oss.driver.api.core.config.DriverConfigLoader;
 import com.datastax.oss.driver.api.core.cql.PreparedStatement;
-
 import java.time.Duration;
-// TODO: end 
 
-// TODO: remove 
 import com.datastax.oss.driver.api.core.cql.ResultSet;
 import com.datastax.oss.driver.api.core.cql.Row;
-import java.util.HashSet;
-import java.util.Set;
+//import java.util.HashSet;
+//import java.util.Set;
 
 import bigdatacourse.hw2.HW2API;
 
@@ -159,109 +155,97 @@ public class HW2StudentAnswer implements HW2API{
 	    selectReviewsByItem = session.prepare("SELECT * FROM " + TABLE_REVIEWS_BY_ITEM + " WHERE asin = ?");
     	
 	}
-
 	@Override
 	public void loadItems(String pathItemsFile) throws Exception {
-	    // initialize 250 threads
-	    ExecutorService executor = Executors.newFixedThreadPool(250);
-	    // allow only 100 concurrent requests to AstraDB at a time
-	    Semaphore throttler = new Semaphore(32);
-
-	    try (BufferedReader br = new BufferedReader(new FileReader(pathItemsFile))) {
-	        String line;
-	        while ((line = br.readLine()) != null) {
-	            final String currentLine = line;
-	            
-	            executor.execute(() -> {
-	            	try {
-	            		throttler.acquire(); // wait for permit to go
-	            	
-		            // extract attributes with fallback to not available 
-	                JSONObject json = new JSONObject(currentLine);
-	                String asin  = json.optString("asin", NOT_AVAILABLE_VALUE);
-	                String title = json.optString("title", NOT_AVAILABLE_VALUE);
-	                String image = json.optString("imUrl", NOT_AVAILABLE_VALUE);
-	                String desc  = json.optString("description", NOT_AVAILABLE_VALUE);
-	                
-		            // check if categories are not empty
-	                if (json.has("categories") && json.getJSONArray("categories").length() != 0) {
-	                    JSONArray categoriesOuter = json.getJSONArray("categories");
-	                    for (int i = 0; i < categoriesOuter.length(); i++) {
-	                        JSONArray categoriesInner = categoriesOuter.getJSONArray(i);
-	                        for (int j = 0; j < categoriesInner.length(); j++) {
-	                            String categoryName = categoriesInner.optString(j, NOT_AVAILABLE_VALUE);
-	                            
-		                        // insert a row for every category using bind
-	                            session.execute(insertItem.bind(asin, categoryName, title, desc, image));
-	                        }
-	                    }
-	                } else {
-	                    // fallback to not available constant if categories are missing
-	                    session.execute(insertItem.bind(asin, NOT_AVAILABLE_VALUE, title, desc, image));
-	                }} catch (Exception e) {
-	        	    	System.out.println("Loading items failed");
-	                } finally {
-	                    throttler.release();
-	                }
-	            });
-	        }
-	    }
-	    
-	    catch (Exception e) {
-	    	System.out.println("Loading items failed");
-	    }
-	    
-	    executor.shutdown();
-	    executor.awaitTermination(1, TimeUnit.HOURS);
-	    System.out.println("Done loading items");
-	}
-
-	@Override
-	public void loadReviews(String pathReviewsFile) throws Exception {
 		// initialize 250 threads
 		ExecutorService executor = Executors.newFixedThreadPool(250);
 		// allow only 100 concurrent requests to AstraDB at a time
 		Semaphore throttler = new Semaphore(100);
 
+		try (BufferedReader br = new BufferedReader(new FileReader(pathItemsFile))) {
+			String line;
+			while ((line = br.readLine()) != null) {
+				final String currentLine = line;
+				
+				executor.execute(() -> {
+					try {
+						throttler.acquire(); // wait for permit to go
+						
+						JSONObject json = new JSONObject(currentLine);
+						String asin  = json.optString("asin", NOT_AVAILABLE_VALUE);
+						String title = json.optString("title", NOT_AVAILABLE_VALUE);
+						String image = json.optString("imUrl", NOT_AVAILABLE_VALUE);
+						String desc  = json.optString("description", NOT_AVAILABLE_VALUE);
+						
+						// check if categories are not empty
+						if (json.has("categories") && json.getJSONArray("categories").length() != 0) {
+							JSONArray categoriesOuter = json.getJSONArray("categories");
+							for (int i = 0; i < categoriesOuter.length(); i++) {
+								JSONArray categoriesInner = categoriesOuter.getJSONArray(i);
+								for (int j = 0; j < categoriesInner.length(); j++) {
+									String categoryName = categoriesInner.optString(j, NOT_AVAILABLE_VALUE);
+									
+									// Flattening categories 
+									session.execute(insertItem.bind(asin, categoryName, title, desc, image));
+								}
+							}
+						} else {
+							// fallback to NA if categories are missing or empty
+							session.execute(insertItem.bind(asin, NOT_AVAILABLE_VALUE, title, desc, image));
+						}
+					} catch (Exception e) {
+					} finally {
+						throttler.release();
+					}
+				});
+			}
+		} catch (Exception e) {
+			System.out.println("Loading items failed: " + e.getMessage());
+		}
+		
+		executor.shutdown();
+		executor.awaitTermination(1, TimeUnit.HOURS);
+		System.out.println("Done loading items");
+	}
+
+	@Override
+	public void loadReviews(String pathReviewsFile) throws Exception {
+		ExecutorService executor = Executors.newFixedThreadPool(250);
+		Semaphore throttler = new Semaphore(100);
+
 		try (BufferedReader br = new BufferedReader(new FileReader(pathReviewsFile))) {
 			String line;
 			while ((line = br.readLine()) != null) {
-						final String currentLine = line;
+				final String currentLine = line;
+				
+				executor.execute(() -> {
+					try {
+						throttler.acquire();
 						
-						executor.execute(() -> {
-							try {
-								throttler.acquire(); // wait for permit to go
-								
-								JSONObject json = new JSONObject(currentLine);
-								
-							// extract attributes with fallback to not available
-							String asin 		= json.optString("asin", NOT_AVAILABLE_VALUE);
-							String reviewerID 	= json.optString("reviewerID", NOT_AVAILABLE_VALUE);
-							String reviewerName = json.optString("reviewerName", NOT_AVAILABLE_VALUE);
-							String summary 		= json.optString("summary", NOT_AVAILABLE_VALUE);
-							String reviewText 	= json.optString("reviewText", NOT_AVAILABLE_VALUE);
-							int rating 			= json.optInt("overall", 0);
-								
-							// convert unixReviewTime (long) to Instant for Cassandra timestamp
-							long unixTime = json.optLong("unixReviewTime", 0);
-							Instant time = Instant.ofEpochSecond(unixTime);
-								
-							// insert into reviews_by_item table
-							session.execute(insertReviewByItem.bind(asin, time, reviewerID, reviewerName, rating, summary, reviewText));
-								
-							// insert into reviews_by_user_table
-							session.execute(insertReviewByUser.bind(reviewerID, time, asin, reviewerName, rating, summary, reviewText));
+						JSONObject json = new JSONObject(currentLine);
+						
+						// Extract attributes 
+						String asin         = json.optString("asin", NOT_AVAILABLE_VALUE);
+						String reviewerID   = json.optString("reviewerID", NOT_AVAILABLE_VALUE);
+						String reviewerName = json.optString("reviewerName", NOT_AVAILABLE_VALUE);
+						String summary      = json.optString("summary", NOT_AVAILABLE_VALUE);
+						String reviewText   = json.optString("reviewText", NOT_AVAILABLE_VALUE);
+						int rating          = json.optInt("overall", 0); 
+						
+						long unixTime = json.optLong("unixReviewTime", 0);
+						Instant time = Instant.ofEpochSecond(unixTime);
+						
+						session.execute(insertReviewByItem.bind(asin, time, reviewerID, reviewerName, rating, summary, reviewText));
+						session.execute(insertReviewByUser.bind(reviewerID, time, asin, reviewerName, rating, summary, reviewText));
 
-							} catch (Exception e) {
-								System.err.println("Failed to load a review line: " + e.getMessage());
-							} finally {
-								throttler.release();
-							}
-						});
+					} catch (Exception e) {
+					} finally {
+						throttler.release();
 					}
-				} 
-		catch (Exception e) {
-				System.out.println("Loading reviews failed: " + e.getMessage());
+				});
+			}
+		} catch (Exception e) {
+			System.out.println("Loading reviews failed: " + e.getMessage());
 		}
 				
 		executor.shutdown();
@@ -352,49 +336,7 @@ public class HW2StudentAnswer implements HW2API{
 		}
 
 		System.out.println("total reviews: " + reviewRepers.size());
-		return reviewRepers;
-	
-		
-		// required format - example for asin B005QDQXGQ
-//		ArrayList<String> reviewRepers = new ArrayList<String>();
-//		reviewRepers.add(
-//			formatReview(
-//				Instant.ofEpochSecond(1391299200),
-//				"B005QDQXGQ",
-//				"A1I5J5RUJ5JB4B",
-//				"T. Taylor \"jediwife3\"",
-//				5,
-//				"Play and Learn",
-//				"The kids had a great time doing hot potato and then having to answer a question if they got stuck with the &#34;potato&#34;. The younger kids all just sat around turnin it to read it."
-//			)
-//		);
-
-//		reviewRepers.add(
-//			formatReview(
-//				Instant.ofEpochSecond(1390694400),
-//				"B005QDQXGQ",
-//				"\"AF2CSZ8IP8IPU\"",
-//				"Corey Valentine \"sue\"",
-//				1,
-//			 	"Not good",
-//				"This Was not worth 8 dollars would not recommend to others to buy for kids at that price do not buy"
-//			)
-//		);
-		
-//		reviewRepers.add(
-//			formatReview(
-//				Instant.ofEpochSecond(1388275200),
-//				"B005QDQXGQ",
-//				"A27W10NHSXI625",
-//				"Beth",
-//				2,
-//				"Way overpriced for a beach ball",
-//				"It was my own fault, I guess, for not thoroughly reading the description, but this is just a blow-up beach ball.  For that, I think it was very overpriced.  I thought at least I was getting one of those pre-inflated kickball-type balls that you find in the giant bins in the chain stores.  This did have a page of instructions for a few different games kids can play.  Still, I think kids know what to do when handed a ball, and there's a lot less you can do with a beach ball than a regular kickball, anyway."
-//			)
-//		);
-
-//		System.out.println("total reviews: " + 3);
-//		return reviewRepers;
+		return reviewRepers;	
 	}
 
 	
